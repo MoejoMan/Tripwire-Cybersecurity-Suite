@@ -1,32 +1,89 @@
 # Cybersecurity Suite
 
-A Python-based security analysis tool for detecting suspicious network behavior, particularly SSH brute-force attacks and authentication anomalies.
+SSH Brute Force Log Analyzer that parses system authentication logs, aggregates attempts by IP, classifies threat levels, and prints a concise summary with optional detailed breakdown. Full results can be exported to CSV.
 
 ## Features
 
-- **Brute-Force Detection**: Analyzes SSH authentication logs to identify and flag suspicious login patterns
-- **Configurable Thresholds**: Customize detection sensitivity with configurable attempt limits and time windows
-- **IP-based Analysis**: Groups attempts by IP address to detect coordinated attacks
-- **User-friendly GUI**: Tkinter-based interface for easy log file selection and analysis
+- **Brute-force detection**: Classifies short-burst and persistent attacks with severity levels (CRITICAL/HIGH/MEDIUM/LOW)
+- **Auto-format parsing**: Supports common syslog and journald formats; auto-detects on first match
+- **Event summaries**: Highlights invalid users and accepted login events
+- **Configurable**: Tunable thresholds via `config.json`; color output can be disabled via environment
+- **CSV export**: Export complete analysis results with timestamps and durations
+
+## Requirements
+
+- Python 3.8+ (built-in libraries only)
+- Access to SSH auth logs (e.g., `/var/log/auth.log`, `/var/log/secure`)
 
 ## Installation
 
 1. Clone this repository
-2. Ensure you have Python 3.x installed
-3. No external dependencies required (uses built-in libraries)
+2. Optional: create a virtual environment
+3. No external dependencies required
+
+## Configuration
+
+Edit `config.json` to tune behavior:
+
+- `max_attempts`: Threshold for short-window detection
+- `time_window_minutes`: Rolling window size for short-burst detection
+- `block_threshold`: Total failed attempts to recommend blocking
+- `monitor_threshold`: Total failed attempts to recommend monitoring
+- `summary_limit`: Max rows to show in terminal summary
+- `verbose_limit`: Max IPs shown in detailed breakdown
+- `color_enabled`: Enable ANSI colors (override with `NO_COLOR` env)
+
+On first run, a default `config.json` is created if missing.
 
 ## Usage
 
-Run the main application:
+Interactive run (opens a file picker if no path provided):
 
 ```bash
 python main.py
 ```
 
-currently, the GUI allows you to:
+Non-interactive (pass a log file and optional summary size):
 
-Select SSH log files for analysis
-View brute-force detection results
-Analyze authentication attempts by IP and username
+```bash
+python main.py --log-file "/var/log/auth.log" --summary-limit 50
+```
 
-This is very early days and I will update this frequently
+Disable color output (useful for CI or plain terminals):
+
+```bash
+NO_COLOR=1 python main.py --log-file "/var/log/auth.log"
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:NO_COLOR = 1
+python .\main.py --log-file "C:\\path\\to\\auth.log"
+```
+
+## Output
+
+The analyzer prints:
+
+- **Log Coverage**: Time window and total parsed attempts
+- **Event Summaries**: Top invalid user and accepted login counts by IP
+- **Threat Analysis Summary**: Severity, IP, attempts, rate, and recommended action
+- **Detailed Breakdown** (optional): Per-IP statistics including window and targeted users
+
+To export all results to CSV, answer `y` when prompted or set `export_csv` in code; the file is saved next to your log as `brute_force_analysis.csv`.
+
+## Notes
+
+- Supported formats are auto-detected; if detection fails, available formats are listed.
+- The parser tracks basic stats: lines read, format matches, extract matches, and timestamp coverage.
+
+## Roadmap
+
+- Additional event types and heuristics
+- Enrichment (GeoIP, ASN) via optional modules
+- Batch processing and scheduling
+
+## License
+
+Proprietary or internal use. Add a license notice here if needed.
