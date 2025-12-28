@@ -48,6 +48,7 @@ class BruteForceDetector:
         self.verbose_limit = verbose_limit
         self.use_color = not os.environ.get('NO_COLOR')
         self.attempts_by_ip = defaultdict(list)
+        self.written_ips = set()  # Track IPs already written to blocklist
 
     def _color(self, text, fg=None, bold=False):
         """
@@ -397,18 +398,26 @@ class BruteForceDetector:
             except Exception as e:
                 print(f"Error exporting CSV: {e}")
         
-        # Export blocklist for iptables/fail2ban
+        # Export blocklist for iptables/fail2ban (append-only for faster detection)
         if export_blocklist and all_results:
             severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
             threshold = severity_order[blocklist_threshold]
             blocked_ips = [r['IP'] for r in all_results if severity_order[r['Severity']] <= threshold]
-            try:
-                with open(export_blocklist, 'w') as f:
-                    for ip in blocked_ips:
-                        f.write(f"{ip}\n")
-                print(f"Blocklist exported to: {export_blocklist} ({len(blocked_ips)} IPs at {blocklist_threshold}+ severity)")
-            except Exception as e:
-                print(f"Error exporting blocklist: {e}")
+            
+            # Only append new IPs (not already written)
+            new_ips = [ip for ip in blocked_ips if ip not in self.written_ips]
+            
+            if new_ips:
+                try:
+                    # Append mode for faster fail2ban polling detection
+                    with open(export_blocklist, 'a') as f:
+                        for ip in new_ips:
+                            f.write(f"{ip}\n")
+                            self.written_ips.add(ip)
+                    print(f"Blocklist updated: {export_blocklist} (+{len(new_ips)} new IPs at {blocklist_threshold}+ severity)")
+                except Exception as e:
+                    print(f"Error updating blocklist: {e}")
+            # Else: no new IPs, skip writing
         
         return all_results  
 
