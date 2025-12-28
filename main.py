@@ -1,19 +1,29 @@
 import re
 import sys
 import os
+import csv
+import shutil
 import tkinter as tk
 from collections import defaultdict
 from datetime import datetime, timedelta
 from tkinter import filedialog
+from parser import SSHLogParser
+from config import Config
 
 class BruteForceDetector:
     """
     Analyzes SSH authentication logs to detect brute-force behaviour.
     """
 
-    def __init__(self, max_attempts=5, time_window_minutes=10):
+    def __init__(self, max_attempts=5, time_window_minutes=10, block_threshold=50, monitor_threshold=20, summary_limit=20, verbose_limit=10):
         self.max_attempts = max_attempts
         self.time_window = timedelta(minutes=time_window_minutes)
+        self.block_threshold = block_threshold
+        self.monitor_threshold = monitor_threshold
+        self.summary_limit = summary_limit
+        self.verbose_limit = verbose_limit
+        # Basic color support (no external deps)
+        self.use_color = not os.environ.get('NO_COLOR')
 
         # will store parsed attempts grouped by IP
         # Example:
@@ -25,7 +35,23 @@ class BruteForceDetector:
         # }
         self.attempts_by_ip = defaultdict(list)
 
-    def add_attempt(self, ip_address, username, timestamp, success):
+    def _color(self, text, fg=None, bold=False):
+        """Apply ANSI color codes if supported."""
+        if not self.use_color:
+            return text
+        codes = []
+        if bold:
+            codes.append('1')
+        fg_map = {
+            'red': '31', 'yellow': '33', 'green': '32', 'cyan': '36', 'blue': '34', 'magenta': '35'
+        }
+        if fg and fg in fg_map:
+            codes.append(fg_map[fg])
+        if not codes:
+            return text
+        return f"\033[{';'.join(codes)}m{text}\033[0m"
+
+    def add_attempt(self, ip_address, username, timestamp, success, event=None):
         """
         Add a parsed SSH login attempt.
         This method will be called AFTER log parsing.
@@ -33,52 +59,264 @@ class BruteForceDetector:
         self.attempts_by_ip[ip_address].append({
             "username": username,
             "timestamp": timestamp,
-            "success": success
+            "success": success,
+            "event": event
         })
 
-    def analyze(self):
+    def classify_threat(self, total_attempts, attack_rate, duration):
+        """Classify threat level based on metrics."""
+        # Rapid attacks - high rate in short window
+        if total_attempts >= self.max_attempts and duration <= self.time_window and attack_rate >= 2.0:
+            return "CRITICAL"
+        elif total_attempts >= self.max_attempts and duration <= self.time_window:
+            return "HIGH"
+        
+        # Persistent attacks - high volume even if slow
+        elif total_attempts >= self.block_threshold:
+            return "HIGH"
+        elif total_attempts >= self.monitor_threshold:
+            return "MEDIUM"
+        
+        # High-rate attacks even if lower volume
+        elif attack_rate > 1.0:
+            return "MEDIUM"
+        
+        elif total_attempts >= self.max_attempts:
+            return "LOW"
+        return "LOW"
+
+    def format_duration(self, delta):
+        """Format timedelta cross-platform."""
+        total_seconds = int(delta.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        return f"{minutes}m {seconds}s"
+
+    def analyze(self, verbose=False, export_csv=None):
         """
         Analyze collected attempts and classify behaviour.
-        Returns analysis results instead of enforcing actions.
+        Args:
+            verbose: Show detailed output (default: summary only)
+            export_csv: Path to export results to CSV file
         """
         THRESHOLD = self.max_attempts
         summary = defaultdict(lambda: defaultdict(int))
 
         for ip, attempts in self.attempts_by_ip.items():
             for attempt in attempts:
-                username = attempt['username']
-                summary[ip][username] += 1
+                # Count only failed attempts towards brute-force summary
+                if not attempt.get('success', False):
+                    username = attempt['username']
+                    summary[ip][username] += 1
 
         sorted_ips = sorted(summary.items(), key=lambda x: sum(x[1].values()), reverse=True)
-
-        print("\nAttempt Summary:")
-        for ip, usernames in sorted_ips:
+        
+        # Pre-compute threat levels and scores for sorting
+        threat_scores = {}
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        
+        for ip, usernames in summary.items():
             total_attempts = sum(usernames.values())
-
             attempts = self.attempts_by_ip[ip]
-
-            print(f"IP: {ip}, Attempts: {total_attempts}")
-            print(f"Username counts: {dict(usernames)}")
-
+            
             if attempts:
                 timestamps = [att['timestamp'] for att in attempts]
-                first = min(timestamps)
-                last = max(timestamps)
-                duration = last - first
+                duration = max(timestamps) - min(timestamps)
+                # Add 1 minute floor to prevent inflated rates from tiny time windows
+                total_minutes = max(duration.total_seconds() / 60, 1.0)
+                attack_rate = total_attempts / total_minutes
+            else:
+                attack_rate = 0
+                duration = timedelta(0)
+            
+            threat_level = self.classify_threat(total_attempts, attack_rate, duration)
+            threat_scores[ip] = (severity_order[threat_level], threat_level, total_attempts)
+        
+        # Sort by: severity first, then by attempt count
+        sorted_ips = sorted(sorted_ips, key=lambda x: threat_scores[x[0]][:2])
+        
+        # Collect results for export
+        results = []
+        
+        # Compute results for all IPs (for full CSV export)
+        all_results = []
+        for (ip, usernames) in sorted_ips:
+            total_attempts = sum(usernames.values())
+            attempts = self.attempts_by_ip[ip]
+            if not attempts:
+                continue
+            timestamps = [att['timestamp'] for att in attempts]
+            first = min(timestamps)
+            last = max(timestamps)
+            duration = last - first
+            total_minutes = max(duration.total_seconds() / 60, 1.0)
+            attack_rate = total_attempts / total_minutes
+            threat_level = self.classify_threat(total_attempts, attack_rate, duration)
+            if threat_level in ["CRITICAL", "HIGH"]:
+                action = "BLOCK"
+            elif threat_level == "MEDIUM":
+                action = "MONITOR"
+            else:
+                action = "ALLOW"
+            all_results.append({
+                'IP': ip,
+                'Attempts': total_attempts,
+                'Attack_Rate': f"{attack_rate:.2f}",
+                'Severity': threat_level,
+                'Action': action,
+                'Duration': self.format_duration(duration),
+                'Window_Start': first.isoformat(),
+                'Window_End': last.isoformat()
+            })
 
-                total_seconds = int(duration.total_seconds())
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                if hours:
-                    duration_str = f"{hours}h {minutes}m {seconds}s"
-                else:
-                    duration_str = f"{minutes}m {seconds}s"
+        # Compute overall coverage stats
+        all_timestamps = []
+        total_parsed_attempts = 0
+        for attempts in self.attempts_by_ip.values():
+            total_parsed_attempts += len(attempts)
+            all_timestamps.extend(att['timestamp'] for att in attempts)
+        ip_count = len(self.attempts_by_ip)
 
-                print(f"Attack window: {first.strftime('%Y-%m-%d %H:%M:%S')} → {last.strftime('%H:%M:%S')} (duration: {duration_str})")
+        # Get terminal width for better formatting
+        term_width = shutil.get_terminal_size((80, 20)).columns
 
-            if total_attempts >= THRESHOLD:
-                print(f"Action: Block IP {ip} due to excessive failed attempts.")
-            print("-" * 60)  
+        # Coverage summary header
+        line_width = min(term_width, 100)
+        print("\n" + "=" * line_width)
+        print(self._color("LOG COVERAGE", bold=True))
+        print("=" * line_width)
+        # Prefer coverage from parser stats; fall back to attempts
+        coverage_start = getattr(self, 'coverage_start', None)
+        coverage_end = getattr(self, 'coverage_end', None)
+        if not coverage_start or not coverage_end:
+            if all_timestamps:
+                coverage_start = min(all_timestamps)
+                coverage_end = max(all_timestamps)
+
+        if coverage_start and coverage_end:
+            coverage_duration = coverage_end - coverage_start
+            coverage_str = self.format_duration(coverage_duration)
+            print(f"Window: {coverage_start.strftime('%Y-%m-%d %H:%M:%S')} to {coverage_end.strftime('%Y-%m-%d %H:%M:%S')} ({coverage_str})")
+            print(f"Parsed IPs: {ip_count:,} | Attempts: {total_parsed_attempts:,}")
+        else:
+            print("No parsed attempts found.")
+
+        # Compact event summaries to keep output concise
+        print("\n" + "=" * line_width)
+        print(self._color("EVENT SUMMARIES", bold=True))
+        print("=" * line_width)
+        
+        # Invalid user summary (top N by count)
+        invalid_counts = defaultdict(int)
+        for ip, attempts in self.attempts_by_ip.items():
+            for att in attempts:
+                if att.get('event') == 'invalid_user':
+                    invalid_counts[ip] += 1
+        if invalid_counts:
+            top_invalid = sorted(invalid_counts.items(), key=lambda x: x[1], reverse=True)[:max(1, self.summary_limit//2)]
+            print(self._color(f"Invalid user attempts (top {len(top_invalid)}):", fg='cyan', bold=True))
+            for ip, cnt in top_invalid:
+                print(f"  {ip:<18} {cnt:>7,} events")
+        else:
+            print("No invalid user events detected.")
+
+        # Accepted password summary (top N by count)
+        accepted_counts = defaultdict(int)
+        for ip, attempts in self.attempts_by_ip.items():
+            for att in attempts:
+                if att.get('success') is True:
+                    accepted_counts[ip] += 1
+        if accepted_counts:
+            top_accepted = sorted(accepted_counts.items(), key=lambda x: x[1], reverse=True)[:max(1, self.summary_limit//2)]
+            print(self._color(f"Accepted password events (top {len(top_accepted)}):", fg='green', bold=True))
+            for ip, cnt in top_accepted:
+                print(f"  {ip:<18} {cnt:>7,} events")
+        else:
+            print("No accepted password events detected.")
+
+        # Threat summary header
+        print("\n" + "=" * line_width)
+        print(self._color("THREAT ANALYSIS SUMMARY", bold=True))
+        print("=" * line_width)
+        
+        # Summary table header
+        print(f"{'SEVERITY':<12} {'IP ADDRESS':<18} {'ATTEMPTS':<12} {'RATE':<12} {'ACTION':<12}")
+        print("-" * line_width)
+
+        for i, r in enumerate(all_results):
+            sev = r['Severity']
+            sev_col = {
+                'CRITICAL': ('red', True),
+                'HIGH': ('yellow', True),
+                'MEDIUM': ('cyan', False),
+                'LOW': (None, False)
+            }
+            fg, bold = sev_col.get(sev, (None, False))
+            sev_text = self._color(sev, fg=fg, bold=bold)
+            rate_val = float(r['Attack_Rate'])
+            action = r['Action']
+            action_col = {
+                'BLOCK': 'red',
+                'MONITOR': 'yellow',
+                'ALLOW': 'green'
+            }.get(action)
+            action_text = self._color(action, fg=action_col, bold=True if action != 'ALLOW' else False)
+            print(f"{sev_text:<12} {r['IP']:<18} {r['Attempts']:>12,} {rate_val:>6.2f}/min {action_text:<12}")
+            # Limit summary output based on configured summary_limit
+            if i >= (self.summary_limit - 1):
+                remaining = len(all_results) - self.summary_limit
+                if remaining > 0:
+                    print("-" * line_width)
+                    print(f"... and {remaining} more. Export to CSV to see all.")
+                break
+
+        print("=" * line_width)
+        print(f"Total suspicious IPs: {len([r for r in all_results if r['Severity'] != 'LOW']):,}")
+        
+        # Verbose mode - detailed breakdown
+        if verbose:
+            print("\n" + "=" * line_width)
+            print(self._color(f"DETAILED BREAKDOWN (Top {self.verbose_limit})", bold=True))
+            print("=" * line_width)
+            
+            for i, (ip, usernames) in enumerate(sorted_ips):
+                if i >= self.verbose_limit:
+                    break
+                    
+                total_attempts = sum(usernames.values())
+                attempts = self.attempts_by_ip[ip]
+                
+                if attempts:
+                    timestamps = [att['timestamp'] for att in attempts]
+                    first = min(timestamps)
+                    last = max(timestamps)
+                    duration = last - first
+                    duration_str = self.format_duration(duration)
+                    
+                    total_minutes = max(duration.total_seconds() / 60, 1.0)
+                    attack_rate = total_attempts / total_minutes
+                    
+                    print(f"\n[IP] {ip}")
+                    print(f"  Attempts: {total_attempts:,}")
+                    print(f"  Attack rate: {attack_rate:.2f} attempts/minute")
+                    print(f"  Targeted users: {', '.join(usernames.keys())}")
+                    print(f"  Window: {first.strftime('%Y-%m-%d %H:%M:%S')} to {last.strftime('%H:%M:%S')} ({duration_str})")
+                    print("-" * line_width)
+        
+        # Export full results to CSV
+        if export_csv and all_results:
+            try:
+                with open(export_csv, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=all_results[0].keys())
+                    writer.writeheader()
+                    writer.writerows(all_results)
+                print(f"\nResults exported to: {export_csv}")
+            except Exception as e:
+                print(f"Error exporting CSV: {e}")
+        
+        return all_results  
 
 def main():
     print("SSH Brute Force Log Analyzer")
@@ -90,6 +328,10 @@ def main():
         filetypes=[("Log files", "*.log"), ("All files", "*.*")]
     )
 
+    if not log_path:
+        print("No file selected. Exiting.")
+        sys.exit(1)
+
     possible_paths = [
         "/var/log/auth.log",        
         "/var/log/secure",           
@@ -97,59 +339,91 @@ def main():
         "C:\\Users\\jhg56\\Downloads\\auth.log",  
     ]
 
-    log_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            log_path = path
-            print(f"Found log file at: {log_path}")
-            input("Do you want to use this file? Press Enter to confirm or Ctrl+C to cancel.")
-            break
+    if not os.path.exists(log_path):
+        log_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                log_path = path
+                print(f"Found log file at: {log_path}")
+                confirm = input("Use this file? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    break
+                log_path = None
 
     if log_path is None:
         print("Error: No common auth.log file found.")
         print("Try placing it in the current folder or specify manually later.")
         sys.exit(1)
-    print(f"Using log file: {log_path}")
-
-    detector = BruteForceDetector()
-    main_pattern = re.compile(r'^\d{4}-\d{1,2}-\d{1,2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:\d{2})?\s+(?P<hostname>\S+)\s+(?P<process>\S+?)(?:\[\d+\]):\s+(?P<info>.*)$')
-    extract_pattern = re.compile(r'Invalid user (\S+) from ([\d.]+)')
-
-    line_count = 0
-    main_matches = 0
-    extract_matches = 0
-    samples = []
     
-    with open(log_path, 'r') as log_file:
-        for line in log_file:
-            line_count += 1
-            main_match = main_pattern.search(line)
-            if main_match:
-                main_matches += 1
-                info = main_match.group('info')
-                timestamp_str = line.split(' ', 1)[0]
-                timestamp_str = timestamp_str.replace('Z', '+00:00') 
-                timestamp = datetime.fromisoformat(timestamp_str)
-
-                if info:
-                    extract_match = extract_pattern.search(info)
-                else:
-                    extract_match = None
-                if extract_match:
-                    extract_matches += 1
-                    username = extract_match.group(1)
-                    ip = extract_match.group(2)
-                    detector.add_attempt(ip, username, timestamp, False)
-                    if len(samples) < 5:
-                        samples.append((ip, username, timestamp, info))
+    print(f"Using log file: {log_path}")
+    
+    # Initialize config, parser and detector
+    config = Config()
+    parser = SSHLogParser()
+    detector = BruteForceDetector(
+        max_attempts=config["max_attempts"],
+        time_window_minutes=config["time_window_minutes"],
+        block_threshold=config["block_threshold"],
+        monitor_threshold=config["monitor_threshold"],
+        summary_limit=config["summary_limit"],
+        verbose_limit=config["verbose_limit"]
+    )
+    # Apply color setting from config unless NO_COLOR env is set
+    if os.environ.get('NO_COLOR'):
+        detector.use_color = False
+    else:
+        detector.use_color = bool(config.get('color_enabled', True))
+    
+    # Parse the log file
+    print("Parsing log file...")
+    t_parse_start = datetime.now()
+    attempts, stats = parser.parse_file(log_path, auto_detect=True)
+    t_parse_end = datetime.now()
     
     print(f"\nProcessing stats:")
-    print(f"Lines read: {line_count}, Main pattern matches: {main_matches}, Extract matches: {extract_matches}")
-    print(f"\nSample matches (first 5):")
-    for ip, username, timestamp, info in samples:
-        print(f"  Time: {timestamp}, IP: {ip}, Username: {username}, Info: {info[:80]}")
+    print(f"Lines read: {stats['lines_read']}")
+    print(f"Format matches: {stats['format_matches']}")
+    print(f"Extract matches: {stats['extract_matches']}")
+    print(f"Failed timestamps: {stats['failed_timestamps']}")
+    if parser.get_detected_format():
+        print(f"Detected format: {parser.get_detected_format()}")
+    else:
+        print("Warning: Could not auto-detect log format.")
+        print("Available formats:")
+        for fmt in parser.list_formats():
+            print(f"  - {fmt}")
+    parse_elapsed = t_parse_end - t_parse_start
+    print(f"Parse time: {parse_elapsed.total_seconds():.2f}s")
     print()
-    detector.analyze()
+    
+    # Add attempts to detector (supports optional event field)
+    for item in attempts:
+        if len(item) == 5:
+            ip, username, timestamp, success, event = item
+        else:
+            ip, username, timestamp, success = item
+            event = None
+        detector.add_attempt(ip, username, timestamp, success, event)
+    
+    # Pass coverage timestamps from parser to detector for accurate window
+    detector.coverage_start = stats.get('first_timestamp')
+    detector.coverage_end = stats.get('last_timestamp')
+    
+    # Ask for verbosity and export
+    verbose_input = input("Show detailed breakdown? (y/n): ").strip().lower()
+    verbose = verbose_input == 'y'
+    
+    export_input = input("Export to CSV? (y/n): ").strip().lower()
+    export_csv = None
+    if export_input == 'y':
+        log_dir = os.path.dirname(log_path) or '.'
+        export_csv = os.path.join(log_dir, 'brute_force_analysis.csv')
+    
+    t_analyze_start = datetime.now()
+    detector.analyze(verbose=verbose, export_csv=export_csv)
+    t_analyze_end = datetime.now()
+    analyze_elapsed = t_analyze_end - t_analyze_start
+    print(f"\nAnalysis time: {analyze_elapsed.total_seconds():.2f}s")
 
 if __name__ == "__main__":
     main()

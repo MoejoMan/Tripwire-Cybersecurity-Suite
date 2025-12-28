@@ -1,0 +1,9 @@
+{
+  "max_attempts": 5,
+  "time_window_minutes": 10,
+  "summary_limit": 20,
+  "verbose_limit": 10,
+  "block_threshold": 50,
+  "monitor_threshold": 20,
+  "color_enabled": true
+}
