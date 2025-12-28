@@ -122,4 +122,4 @@ To export all results to CSV, answer `y` when prompted or set `export_csv` in co
 
 ## License
 
-Proprietary or internal use. Add a license notice here if needed.
+None yet, lol
