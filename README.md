@@ -146,6 +146,69 @@ The analyzer prints:
 
 To export all results to CSV, answer `y` when prompted or set `export_csv` in code; the file is saved next to your log as `brute_force_analysis.csv`.
 
+## Fail2ban Integration
+
+Export a blocklist of malicious IPs for use with fail2ban or manual iptables blocking:
+
+```bash
+# Export HIGH+ severity IPs to blocklist (default threshold)
+python3 main.py --log-file "/var/log/auth.log" --export-blocklist blocked-ips.txt
+
+# Export only CRITICAL IPs
+python3 main.py --log-file "/var/log/auth.log" --export-blocklist blocked-ips.txt --blocklist-threshold CRITICAL
+
+# Live mode with continuous blocklist updates
+python3 main.py --log-file "/var/log/auth.log" --live --export-blocklist /var/log/ssh-blocklist.txt --blocklist-threshold HIGH
+```
+
+### Manual iptables blocking
+
+```bash
+# Block all IPs from the generated file
+while read ip; do
+  sudo iptables -A INPUT -s $ip -j DROP
+done < blocked-ips.txt
+
+# View current blocks
+sudo iptables -L INPUT -v -n
+
+# Remove all blocks
+sudo iptables -F INPUT
+```
+
+### Automated fail2ban setup
+
+1. Copy filter config:
+```bash
+sudo cp examples/fail2ban-ssh-analyzer.conf /etc/fail2ban/filter.d/
+```
+
+2. Add jail to `/etc/fail2ban/jail.local`:
+```ini
+[ssh-analyzer]
+enabled  = true
+filter   = ssh-analyzer
+logpath  = /var/log/ssh-blocklist.txt
+backend  = polling
+maxretry = 1
+findtime = 86400
+bantime  = 604800
+action   = iptables-multiport[name=SSH, port="ssh", protocol=tcp]
+```
+
+3. Run analyzer in live mode writing to blocklist:
+```bash
+python3 main.py --log-file "/var/log/auth.log" --live --export-blocklist /var/log/ssh-blocklist.txt --strict
+```
+
+4. Restart fail2ban:
+```bash
+sudo systemctl restart fail2ban
+sudo fail2ban-client status ssh-analyzer
+```
+
+See `examples/` folder for complete config files.
+
 ## Notes
 
 - Supported formats are auto-detected; if detection fails, available formats are listed.

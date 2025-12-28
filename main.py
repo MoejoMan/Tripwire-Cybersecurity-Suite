@@ -144,7 +144,7 @@ class BruteForceDetector:
             return f"{hours}h {minutes}m {seconds}s"
         return f"{minutes}m {seconds}s"
 
-    def analyze(self, verbose=False, export_csv=None, filter_severity=None, compact=False, live_mode=False):
+    def analyze(self, verbose=False, export_csv=None, filter_severity=None, compact=False, live_mode=False, export_blocklist=None, blocklist_threshold='HIGH'):
         """
         Aggregate attempts, compute severity, and render summaries.
 
@@ -154,6 +154,8 @@ class BruteForceDetector:
         - filter_severity: Only show threats at or above this level (CRITICAL/HIGH/MEDIUM/LOW).
         - compact: Skip event summaries, show only threat table.
         - live_mode: Suppress pagination messages for continuous monitoring.
+        - export_blocklist: Optional path to export IPs to blocklist file.
+        - blocklist_threshold: Minimum severity for blocklist inclusion (default: HIGH).
 
         Returns:
         - List of dict rows with keys: IP, Attempts, Attack_Rate, Severity,
@@ -395,6 +397,19 @@ class BruteForceDetector:
             except Exception as e:
                 print(f"Error exporting CSV: {e}")
         
+        # Export blocklist for iptables/fail2ban
+        if export_blocklist and all_results:
+            severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+            threshold = severity_order[blocklist_threshold]
+            blocked_ips = [r['IP'] for r in all_results if severity_order[r['Severity']] <= threshold]
+            try:
+                with open(export_blocklist, 'w') as f:
+                    for ip in blocked_ips:
+                        f.write(f"{ip}\n")
+                print(f"Blocklist exported to: {export_blocklist} ({len(blocked_ips)} IPs at {blocklist_threshold}+ severity)")
+            except Exception as e:
+                print(f"Error exporting blocklist: {e}")
+        
         return all_results  
 
 def main():
@@ -418,6 +433,8 @@ def main():
     argp.add_argument("--noisy", dest="noisy", action="store_true", help="Preset: show everything (no filter, no compact)")
     argp.add_argument("--strict", dest="strict", action="store_true", help="Preset: SSH-key-only mode (max_attempts=1, flags any password attempt)")
     argp.add_argument("--mode", dest="mode", choices=['soc', 'verbose'], help="Preset: soc (HIGH+ compact fast refresh) or verbose (full detail)")
+    argp.add_argument("--export-blocklist", dest="export_blocklist", help="Export IPs to blocklist file (one per line) for iptables/fail2ban")
+    argp.add_argument("--blocklist-threshold", dest="blocklist_threshold", choices=['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'], default='HIGH', help="Minimum severity for blocklist (default: HIGH)")
     args = argp.parse_args()
     print("SSH Brute Force Log Analyzer")
     print("=" * 40)
@@ -543,12 +560,12 @@ def main():
                 detector.coverage_end = parser.stats.get('last_timestamp')
                 now = datetime.now()
                 if (now - last_refresh).total_seconds() >= refresh_interval:
-                    detector.analyze(verbose=False, export_csv=None, filter_severity=filter_sev, compact=compact_mode, live_mode=True)
+                    detector.analyze(verbose=False, export_csv=None, filter_severity=filter_sev, compact=compact_mode, live_mode=True, export_blocklist=args.export_blocklist, blocklist_threshold=args.blocklist_threshold)
                     print("\n" * 5 + "=" * 100 + "\n" * 5)
                     last_refresh = now
         except KeyboardInterrupt:
             print("\nStopping live mode. Final summary:")
-            detector.analyze(verbose=False, export_csv=None, filter_severity=filter_sev, compact=compact_mode, live_mode=True)
+            detector.analyze(verbose=False, export_csv=None, filter_severity=filter_sev, compact=compact_mode, live_mode=True, export_blocklist=args.export_blocklist, blocklist_threshold=args.blocklist_threshold)
         return
 
     # Batch mode: parse the log file
@@ -600,7 +617,9 @@ def main():
     # Apply CLI filters in batch mode too
     filter_sev = args.filter_severity if hasattr(args, 'filter_severity') else None
     compact_mode = bool(args.compact) if hasattr(args, 'compact') else False
-    detector.analyze(verbose=verbose, export_csv=export_csv, filter_severity=filter_sev, compact=compact_mode, live_mode=False)
+    blocklist_path = args.export_blocklist if hasattr(args, 'export_blocklist') else None
+    blocklist_thresh = args.blocklist_threshold if hasattr(args, 'blocklist_threshold') else 'HIGH'
+    detector.analyze(verbose=verbose, export_csv=export_csv, filter_severity=filter_sev, compact=compact_mode, live_mode=False, export_blocklist=blocklist_path, blocklist_threshold=blocklist_thresh)
     t_analyze_end = datetime.now()
     analyze_elapsed = t_analyze_end - t_analyze_start
     print(f"\nAnalysis time: {analyze_elapsed.total_seconds():.2f}s")
