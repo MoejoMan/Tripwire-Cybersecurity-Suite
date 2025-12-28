@@ -472,6 +472,7 @@ def main():
                 now = datetime.now()
                 if (now - last_refresh).total_seconds() >= refresh_interval:
                     detector.analyze(verbose=False, export_csv=None)
+                    print("\n" + "=" * 100 + "\n")
                     last_refresh = now
         except KeyboardInterrupt:
             print("\nStopping live mode. Final summary:")
