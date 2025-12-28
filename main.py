@@ -15,12 +15,11 @@ import os
 import csv
 import shutil
 import argparse
-import tkinter as tk
 from collections import defaultdict
 from datetime import datetime, timedelta
-from tkinter import filedialog
 from parser import SSHLogParser
 from config import Config
+from utils import follow_file
 
 class BruteForceDetector:
     """
@@ -383,16 +382,24 @@ def main():
     argp = argparse.ArgumentParser(description="SSH Brute Force Log Analyzer")
     argp.add_argument("--log-file", dest="log_file", help="Path to auth/secure log file")
     argp.add_argument("--summary-limit", dest="summary_limit", type=int, help="Max rows to show in terminal summary")
+    argp.add_argument("--live", dest="live", action="store_true", help="Follow the log file and analyze in real-time")
+    argp.add_argument("--follow-start", dest="follow_start", action="store_true", help="Start live mode from the beginning of the file")
+    argp.add_argument("--refresh", dest="refresh", type=float, help="Seconds between summary refresh in live mode")
     args = argp.parse_args()
     print("SSH Brute Force Log Analyzer")
     print("=" * 40)
-    tk.Tk().withdraw()
-
-    # If --log-file is provided, use it; otherwise open a file dialog
-    log_path = args.log_file if args.log_file else filedialog.askopenfilename(
-        title="Select your auth.log file",
-        filetypes=[("Log files", "*.log"), ("All files", "*.*")]
-    )
+    
+    # Only import tkinter and show GUI if not in live mode and no log-file provided
+    if args.live or args.log_file:
+        log_path = args.log_file
+    else:
+        import tkinter as tk
+        from tkinter import filedialog
+        tk.Tk().withdraw()
+        log_path = filedialog.askopenfilename(
+            title="Select your auth.log file",
+            filetypes=[("Log files", "*.log"), ("All files", "*.*")]
+        )
 
     if not log_path:
         print("No file selected. Exiting.")
@@ -442,8 +449,36 @@ def main():
         detector.use_color = False
     else:
         detector.use_color = bool(config.get('color_enabled', True))
-    
-    # Parse the log file
+
+    # Live mode: follow file and periodically refresh summary
+    if args.live:
+        print("\nLive mode: following log for new entries...")
+        refresh_interval = args.refresh if args.refresh else 5.0
+        start_from_beginning = bool(args.follow_start)
+        last_refresh = datetime.now()
+        try:
+            for line in follow_file(log_path, start_from_end=not start_from_beginning, poll_seconds=0.5):
+                line_attempts = parser.parse_line(line, auto_detect=True)
+                for item in line_attempts:
+                    if len(item) == 5:
+                        ip, username, timestamp, success, event = item
+                    else:
+                        ip, username, timestamp, success = item
+                        event = None
+                    detector.add_attempt(ip, username, timestamp, success, event)
+                # Update coverage from parser stats
+                detector.coverage_start = parser.stats.get('first_timestamp')
+                detector.coverage_end = parser.stats.get('last_timestamp')
+                now = datetime.now()
+                if (now - last_refresh).total_seconds() >= refresh_interval:
+                    detector.analyze(verbose=False, export_csv=None)
+                    last_refresh = now
+        except KeyboardInterrupt:
+            print("\nStopping live mode. Final summary:")
+            detector.analyze(verbose=False, export_csv=None)
+        return
+
+    # Batch mode: parse the log file
     print("Parsing log file...")
     t_parse_start = datetime.now()
     attempts, stats = parser.parse_file(log_path, auto_detect=True)

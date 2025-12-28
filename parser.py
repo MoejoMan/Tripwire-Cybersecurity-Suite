@@ -162,6 +162,62 @@ class SSHLogParser:
         
         return attempts, self.stats
     
+    def parse_line(self, line: str, auto_detect: bool = True) -> List[Tuple]:
+        """Parse a single log line, updating stats and returning extracted attempts."""
+        attempts = []
+        self.stats['lines_read'] += 1
+        
+        # Auto-detect format on first match
+        if self.detected_format is None and auto_detect:
+            for fmt in self.FORMATS:
+                if fmt.main_pattern.search(line):
+                    self.detected_format = fmt
+                    break
+        
+        if self.detected_format is None:
+            return attempts
+        
+        # Try to parse with detected format
+        match = self.detected_format.main_pattern.search(line)
+        if not match:
+            return attempts
+        
+        self.stats['format_matches'] += 1
+        info = match.group('info')
+        
+        try:
+            timestamp = self.detected_format.parse_timestamp(line)
+        except (ValueError, IndexError):
+            self.stats['failed_timestamps'] += 1
+            return attempts
+        
+        # Track coverage timestamps from any main match
+        if self.stats['first_timestamp'] is None:
+            self.stats['first_timestamp'] = timestamp
+        self.stats['last_timestamp'] = timestamp
+        
+        # Extract IP and username from info using format-specific or generic patterns
+        if info:
+            # Try format-specific pattern first
+            fmt_match = self.detected_format.extract_pattern.search(info) if hasattr(self.detected_format, 'extract_pattern') and self.detected_format.extract_pattern else None
+            if fmt_match:
+                self.stats['extract_matches'] += 1
+                username = fmt_match.group(1)
+                ip = fmt_match.group(2)
+                attempts.append((ip, username, timestamp, False, 'invalid_user'))
+            else:
+                # Fall back to generic patterns from rules
+                for p in PATTERNS:
+                    m = p['regex'].search(info)
+                    if m:
+                        self.stats['extract_matches'] += 1
+                        username = m.group('username')
+                        ip = m.group('ip')
+                        attempts.append((ip, username, timestamp, p['success'], p['name']))
+                        break
+        
+        return attempts
+    
     def set_format(self, format_name: str) -> bool:
         """
         Manually set log format by name.
