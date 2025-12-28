@@ -1,7 +1,14 @@
-import re
+"""
+Canonical SSH info-line parsing rules.
 
-# SSH info-line patterns with named groups.
-# Extendable: add more dicts with 'name', 'regex', and 'success'.
+Each rule provides:
+- name: short identifier for the event type
+- regex: compiled pattern with named groups `username` and `ip`
+- success: whether the event indicates a successful authentication
+
+Add new dicts to extend coverage for additional sshd messages.
+"""
+import re
 
 PATTERNS = [
 	{

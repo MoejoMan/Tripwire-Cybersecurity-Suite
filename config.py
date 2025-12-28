@@ -1,6 +1,9 @@
 """
-Configuration loader for SSH Brute Force Detector.
-Loads settings from config.json, falls back to defaults if not found.
+Configuration management for the SSH Brute Force Analyzer.
+
+Loads settings from config.json when present; otherwise writes and uses
+well-chosen defaults. Exposes dict-like access and a helper for converting
+the active configuration to a plain dict.
 """
 import json
 import os
@@ -8,7 +11,18 @@ from typing import Dict, Any
 
 
 class Config:
-    """Load and manage configuration."""
+    """
+    Load and manage analyzer configuration.
+
+    Keys:
+    - max_attempts: threshold for short-window brute-force detection
+    - time_window_minutes: size of detection window in minutes
+    - summary_limit: max rows to display in the summary table
+    - verbose_limit: max IPs to include in verbose mode
+    - block_threshold: persistent attempts threshold to recommend blocking
+    - monitor_threshold: persistent attempts threshold to recommend monitoring
+    - color_enabled: enable ANSI colors in terminal output
+    """
     
     # Default configuration
     DEFAULTS = {
@@ -38,7 +52,7 @@ class Config:
             self._create_default_config(config_path)
     
     def _load_from_file(self, config_path: str):
-        """Load configuration from JSON file."""
+        """Load configuration values from a JSON file at `config_path`."""
         try:
             with open(config_path, 'r') as f:
                 file_config = json.load(f)
@@ -55,7 +69,7 @@ class Config:
             print(f"  Using default configuration")
     
     def _create_default_config(self, config_path: str):
-        """Create a default config file."""
+        """Write DEFAULTS to `config_path` to bootstrap configuration."""
         try:
             with open(config_path, 'w') as f:
                 json.dump(self.DEFAULTS, f, indent=2)
@@ -64,20 +78,20 @@ class Config:
             print(f"⚠ Could not create config file: {e}")
     
     def get(self, key: str, default=None) -> Any:
-        """Get a config value."""
+        """Return the value for `key`, or `default` if the key is missing."""
         return self.config.get(key, default)
     
     def __getitem__(self, key: str) -> Any:
-        """Allow dict-like access."""
+        """Dict-style access to configuration values (e.g., config["summary_limit"])."""
         return self.config[key]
     
     def __str__(self) -> str:
-        """Display current configuration."""
+        """Return a human-readable representation of the active configuration."""
         lines = ["Current Configuration:"]
         for key, value in self.config.items():
             lines.append(f"  {key}: {value}")
         return "\n".join(lines)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Return config as dictionary."""
+        """Return a shallow copy of the active configuration as a dict."""
         return self.config.copy()

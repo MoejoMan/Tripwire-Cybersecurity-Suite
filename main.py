@@ -1,3 +1,14 @@
+"""
+SSH Brute Force Analysis CLI.
+
+This script parses SSH authentication logs, aggregates login attempts by IP,
+classifies threat levels, and prints a concise summary and optional detailed
+breakdown. It can export full results to CSV for further analysis.
+
+Usage:
+- Non-interactive: provide a path with --log-file
+- Interactive: if no path is provided, a file picker will open
+"""
 import re
 import sys
 import os
@@ -13,7 +24,20 @@ from config import Config
 
 class BruteForceDetector:
     """
-    Analyzes SSH authentication logs to detect brute-force behaviour.
+        Detects and summarizes brute-force behaviour in SSH authentication logs.
+
+        Parameters:
+        - max_attempts: Number of failed attempts within `time_window_minutes` to flag an IP.
+        - time_window_minutes: Size of rolling window used for short-burst detection.
+        - block_threshold: Total failed attempts to recommend blocking (persistent attacks).
+        - monitor_threshold: Total failed attempts to recommend monitoring.
+        - summary_limit: Maximum rows printed in the summary table.
+        - verbose_limit: Maximum IPs included in the verbose breakdown.
+
+        Attributes:
+        - attempts_by_ip: Mapping of IP to list of parsed attempts with `username`,
+            `timestamp`, `success`, and optional `event` label.
+        - use_color: Whether to use ANSI colors in terminal output.
     """
 
     def __init__(self, max_attempts=5, time_window_minutes=10, block_threshold=50, monitor_threshold=20, summary_limit=20, verbose_limit=10):
@@ -23,21 +47,21 @@ class BruteForceDetector:
         self.monitor_threshold = monitor_threshold
         self.summary_limit = summary_limit
         self.verbose_limit = verbose_limit
-        # Basic color support (no external deps)
         self.use_color = not os.environ.get('NO_COLOR')
-
-        # will store parsed attempts grouped by IP
-        # Example:
-        # {
-        #   "92.118.39.62": [
-        #       {"username": "root", "timestamp": datetime, "success": False},
-        #       ...
-        #   ]
-        # }
         self.attempts_by_ip = defaultdict(list)
 
     def _color(self, text, fg=None, bold=False):
-        """Apply ANSI color codes if supported."""
+        """
+        Return `text` decorated with ANSI color codes when enabled.
+
+        Args:
+        - text: String to colorize.
+        - fg: Optional foreground color name (red, yellow, green, cyan, blue, magenta).
+        - bold: Whether to apply bold styling.
+
+        Returns:
+        - The possibly colorized text, or the original text when color is disabled.
+        """
         if not self.use_color:
             return text
         codes = []
@@ -54,8 +78,14 @@ class BruteForceDetector:
 
     def add_attempt(self, ip_address, username, timestamp, success, event=None):
         """
-        Add a parsed SSH login attempt.
-        This method will be called AFTER log parsing.
+        Record a single SSH auth attempt parsed from the logs.
+
+        Args:
+        - ip_address: Source IP address.
+        - username: Target account name.
+        - timestamp: Attempt time as `datetime`.
+        - success: True if authentication succeeded; False otherwise.
+        - event: Optional label describing the event type (e.g., 'invalid_user').
         """
         self.attempts_by_ip[ip_address].append({
             "username": username,
@@ -65,7 +95,23 @@ class BruteForceDetector:
         })
 
     def classify_threat(self, total_attempts, attack_rate, duration):
-        """Classify threat level based on metrics."""
+        """
+        Classify threat severity from aggregate metrics.
+
+        Logic:
+        - Short-burst attacks: high volume within `time_window` → CRITICAL/HIGH.
+        - Persistent attacks: very high total volume regardless of rate → HIGH/MEDIUM.
+        - Elevated rate with moderate volume → MEDIUM.
+        - Otherwise → LOW.
+
+        Args:
+        - total_attempts: Total failed attempts for an IP.
+        - attack_rate: Failed attempts per minute over the observed window.
+        - duration: `timedelta` covering first to last attempt.
+
+        Returns:
+        - One of {'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'}.
+        """
         # Rapid attacks - high rate in short window
         if total_attempts >= self.max_attempts and duration <= self.time_window and attack_rate >= 2.0:
             return "CRITICAL"
@@ -87,7 +133,11 @@ class BruteForceDetector:
         return "LOW"
 
     def format_duration(self, delta):
-        """Format timedelta cross-platform."""
+        """
+        Format a `timedelta` as a compact human-readable string.
+
+        Example: "2h 3m 15s" or "7m 04s".
+        """
         total_seconds = int(delta.total_seconds())
         hours, remainder = divmod(total_seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
@@ -97,10 +147,15 @@ class BruteForceDetector:
 
     def analyze(self, verbose=False, export_csv=None):
         """
-        Analyze collected attempts and classify behaviour.
+        Aggregate attempts, compute severity, and render summaries.
+
         Args:
-            verbose: Show detailed output (default: summary only)
-            export_csv: Path to export results to CSV file
+        - verbose: If True, include a per-IP detailed breakdown.
+        - export_csv: Optional path to export the full results table.
+
+        Returns:
+        - List of dict rows with keys: IP, Attempts, Attack_Rate, Severity,
+          Action, Duration, Window_Start, Window_End.
         """
         THRESHOLD = self.max_attempts
         summary = defaultdict(lambda: defaultdict(int))
@@ -320,6 +375,10 @@ class BruteForceDetector:
         return all_results  
 
 def main():
+    """
+    Entry point: parse CLI args, read the log file, run analysis, and print
+    results. Offers interactive prompts for verbosity and CSV export.
+    """
     # CLI flags for non-interactive runs
     argp = argparse.ArgumentParser(description="SSH Brute Force Log Analyzer")
     argp.add_argument("--log-file", dest="log_file", help="Path to auth/secure log file")

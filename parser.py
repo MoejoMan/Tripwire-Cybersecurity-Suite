@@ -1,5 +1,9 @@
 """
-Multi-format SSH log parser supporting various Linux distributions and log formats.
+Multi-format SSH log parser supporting common Linux distributions and log formats.
+
+The parser attempts auto-detection on first match and tracks coverage
+timestamps, basic match statistics, and per-line extraction using rules
+defined in rules.py. It returns normalized attempts suitable for analysis.
 """
 import re
 from datetime import datetime
@@ -22,7 +26,13 @@ class LogFormat:
 
 
 class SSHLogParser:
-    """Parses SSH authentication logs in multiple formats."""
+    """
+    Parse SSH authentication logs across multiple formats.
+
+    Tracks statistics including:
+    - lines_read, format_matches, extract_matches, failed_timestamps
+    - first_timestamp, last_timestamp
+    """
     
     # Ubuntu/Debian format (ISO 8601 style)
     UBUNTU_FORMAT = LogFormat(
