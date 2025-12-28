@@ -329,8 +329,6 @@ class BruteForceDetector:
 
         print("=" * line_width)
         print(f"Total suspicious IPs: {len([r for r in all_results if r['Severity'] != 'LOW']):,}")
-        print("\n\n\n")
-
         
         # Verbose mode - detailed breakdown
         if verbose:
@@ -474,7 +472,7 @@ def main():
                 now = datetime.now()
                 if (now - last_refresh).total_seconds() >= refresh_interval:
                     detector.analyze(verbose=False, export_csv=None)
-                    print("\n" + "=" * 100 + "\n")
+                    print("\n" * 5 + "=" * 100 + "\n" * 5)
                     last_refresh = now
         except KeyboardInterrupt:
             print("\nStopping live mode. Final summary:")
