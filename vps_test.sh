@@ -165,30 +165,33 @@ else
     echo -e "${RED}[FAIL] CSV not created or empty${NC}"
 fi
 
-# Test 4: CSV export (live mode - 5 second test)
-echo "[TEST 4/5] CSV export (live mode)..."
-timeout 5 $PYTHON_CMD "$TRIPWIRE_DIR/main.py" \
-    --log-file test_auth.log \
-    --live \
-    --export-csv test_live.csv \
-    > /dev/null 2>&1 || true  # timeout returns non-zero
+# Test 4: CSV export (large log performance test)
+echo "[TEST 4/5] CSV export (large log)..."
+$PYTHON_CMD "$TRIPWIRE_DIR/main.py" \
+    --log-file large_auth.log \
+    --non-interactive \
+    --export-csv test_large.csv \
+    > /dev/null 2>&1
 
-if [ -f test_live.csv ] && [ -s test_live.csv ]; then
+if [ -f test_large.csv ] && [ -s test_large.csv ]; then
     echo -e "${GREEN}[PASS]${NC}"
 else
-    echo -e "${RED}[FAIL] Live CSV not created or empty${NC}"
+    echo -e "${RED}[FAIL] CSV not created or empty${NC}"
 fi
 
-# Test 5: IP validation (test with real auth.log if available)
+# Test 5: IP validation (test with real auth.log or fallback)
 echo "[TEST 5/5] IP validation on real log..."
+TEST_LOG="test_auth.log"
 if [ -f /var/log/auth.log ]; then
-    $PYTHON_CMD "$TRIPWIRE_DIR/main.py" \
-        --log-file /var/log/auth.log \
-        --non-interactive \
-        > /dev/null 2>&1 && echo -e "${GREEN}[PASS]${NC}" || echo -e "${RED}[FAIL]${NC}"
-else
-    echo -e "${YELLOW}[SKIP] /var/log/auth.log not found${NC}"
+    TEST_LOG="/var/log/auth.log"
+elif [ -f /var/log/secure ]; then
+    TEST_LOG="/var/log/secure"
 fi
+
+$PYTHON_CMD "$TRIPWIRE_DIR/main.py" \
+    --log-file "$TEST_LOG" \
+    --non-interactive \
+    > /dev/null 2>&1 && echo -e "${GREEN}[PASS]${NC}" || echo -e "${RED}[FAIL]${NC}"
 
 echo ""
 echo -e "${GREEN}SMOKE TESTS COMPLETE${NC}"
