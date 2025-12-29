@@ -1,4 +1,4 @@
-```
+<pre>
 
 ooooo        o                   o              
   8                                             
@@ -10,7 +10,7 @@ ooooo        o                   o
 :::::::::::::::8 :::::::::::::::::::::::::::::::
 :::::::::::::::..:::::::::::::::::::::::::::::::
 
-```
+</pre>
 ## Version 1.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
