@@ -505,7 +505,7 @@ def is_process_running(pid):
     """Check if a process with given PID is still running (cross-platform)."""
     if os.name == 'nt':  # Windows
         try:
-            import psutil
+            import psutil # type: ignore[import]
             return psutil.pid_exists(pid)
         except ImportError:
             # psutil not available on Windows; assume process is running to be safe
