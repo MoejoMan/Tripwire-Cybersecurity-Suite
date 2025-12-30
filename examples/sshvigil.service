@@ -1,0 +1,22 @@
+[Unit]
+Description=SSHVigil SSH Brute Force Detector
+After=network.target syslog.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/sshvigil
+ExecStart=/usr/bin/python3 /opt/sshvigil/main.py \
+  --log-file /var/log/auth.log \
+  --live \
+  --refresh 5 \
+  --export-blocklist /var/lib/sshvigil/blocklist.txt \
+  --whitelist /etc/sshvigil/whitelist.txt \
+  --export-csv /var/log/sshvigil_live.csv \
+  --quiet
+
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sshvigil

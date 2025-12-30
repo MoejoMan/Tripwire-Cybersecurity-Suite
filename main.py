@@ -573,7 +573,7 @@ def main():
     """
     # CLI flags for non-interactive runs
     argp = argparse.ArgumentParser(
-        description="Tripwire - SSH Brute Force Detection & Defense",
+        description="SSHVigil - SSH Brute Force Detection & Defense",
         epilog="Examples:\n  python3 main.py --log-file /var/log/auth.log --live -f HIGH --compact --refresh 10\n  python3 main.py --log-file /var/log/auth.log --live --mode soc\n  python3 main.py --log-file /var/log/auth.log --live --follow-start --summary-limit 10\n  python3 main.py --log-file /var/log/auth.log --live --mode verbose\n"
     )
     argp.add_argument("--log-file", dest="log_file", help="Path to auth/secure log file")
@@ -593,7 +593,7 @@ def main():
     argp.add_argument("--non-interactive", dest="non_interactive", action="store_true", help="Suppress prompts for automation (batch mode will skip verbose/export questions)")
     argp.add_argument("--whitelist", dest="whitelist", help="Path to whitelist file (one IP per line) to exclude from blocklist")
     args = argp.parse_args()
-    print("Tripwire - SSH Brute Force Analyzer")
+    print("SSHVigil - SSH Brute Force Analyzer")
     print("=" * 40)
     
     # Only import tkinter and show GUI if not in live mode and no log-file provided

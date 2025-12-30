@@ -1,38 +1,38 @@
-# Installation and Usage Guide for Tripwire Examples
+# Installation and Usage Guide for SSHVigil
 
 ## Systemd Service (Continuous Monitoring)
 
 **Install:**
 ```bash
-# Copy Tripwire to /opt
-sudo cp -r . /opt/tripwire
+# Copy SSHVigil to /opt
+sudo cp -r . /opt/sshvigil
 
-# Create directories
-sudo mkdir -p /var/lib/tripwire
-sudo mkdir -p /etc/tripwire
+# Create data directories
+sudo mkdir -p /var/lib/sshvigil
+sudo mkdir -p /etc/sshvigil
 
 # Create whitelist
-sudo bash -c 'cat > /etc/tripwire/whitelist.txt << EOF
+sudo bash -c 'cat > /etc/sshvigil/whitelist.txt << EOF
 # Add your trusted IPs here (one per line)
 127.0.0.1
 EOF'
 
 # Install service
-sudo cp examples/tripwire.service /etc/systemd/system/
+sudo cp examples/sshvigil.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable tripwire
-sudo systemctl start tripwire
+sudo systemctl enable sshvigil
+sudo systemctl start sshvigil
 ```
 
 **Check status:**
 ```bash
-sudo systemctl status tripwire
-sudo journalctl -u tripwire -f
+sudo systemctl status sshvigil
+sudo journalctl -u sshvigil -f
 ```
 
 **View live CSV output:**
 ```bash
-tail -f /var/log/tripwire_live.csv
+tail -f /var/log/sshvigil_live.csv
 ```
 
 ---
@@ -49,7 +49,7 @@ sudo cp examples/tripwire-cron.sh /etc/cron.hourly/tripwire-analysis
 
 # Or add to crontab for custom schedule
 sudo crontab -e
-# Add: 0 * * * * /opt/tripwire/examples/tripwire-cron.sh
+# Add: 0 * * * * /opt/sshvigil/examples/sshvigil-cron.sh
 ```
 
 **Check results:**
@@ -72,13 +72,13 @@ sudo apt install fail2ban  # Debian/Ubuntu
 sudo yum install fail2ban  # CentOS/RHEL
 
 # Copy jail config
-sudo cp examples/fail2ban-tripwire.conf /etc/fail2ban/jail.d/
+sudo cp examples/fail2ban-sshvigil.conf /etc/fail2ban/jail.d/
 
-# Start Tripwire with blocklist export (via systemd or manually)
-sudo systemctl start tripwire
+# Start SSHVigil with blocklist export (via systemd or manually)
+sudo systemctl start sshvigil
 # OR run manually:
 python3 main.py --log-file /var/log/auth.log --live \
-  --export-blocklist /var/lib/tripwire/blocklist.txt --quiet
+  --export-blocklist /var/lib/sshvigil/blocklist.txt --quiet
 
 # Restart fail2ban
 sudo systemctl restart fail2ban
@@ -105,11 +105,11 @@ sudo fail2ban-client set tripwire-blocklist unbanip 192.0.2.10
 
 ## Combined Setup (Recommended)
 
-Run Tripwire as a systemd service + fail2ban for enforcement:
+Run SSHVigil as a systemd service + fail2ban for enforcement:
 
 ```bash
-# 1. Install Tripwire service (continuous monitoring)
-sudo systemctl enable --now tripwire
+# 1. Install SSHVigil service (continuous monitoring)
+sudo systemctl enable --now sshvigil
 
 # 2. Install fail2ban integration (automatic banning)
 sudo cp examples/fail2ban-tripwire.conf /etc/fail2ban/jail.d/
@@ -121,7 +121,7 @@ sudo fail2ban-client status tripwire-blocklist
 ```
 
 This setup provides:
-- Real-time SSH threat monitoring (Tripwire systemd service)
+- Real-time SSH threat monitoring (SSHVigil systemd service)
 - Automated IP blocking via iptables (fail2ban)
 - Continuous CSV logging for forensics
 - Whitelist protection for trusted IPs

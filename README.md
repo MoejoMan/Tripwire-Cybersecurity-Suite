@@ -144,7 +144,7 @@ python3 main.py --log-file "/var/log/auth.log" --live --quiet   # same as HIGH+ 
 python3 main.py --log-file "/var/log/auth.log" --live --noisy   # show everything
 ```
 
-## v1.0 New Features
+## v1.0 Features
 
 ### Non-Interactive Mode
 Run without prompts for automation (cron jobs, systemd timers):
