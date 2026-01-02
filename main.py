@@ -959,23 +959,28 @@ def main():
                 existing_ips = load_existing_blocklist(args.export_blocklist)
                 if existing_ips:
                     print(f"\n[WARNING] Found existing blocklist with {len(existing_ips)} IPs: {args.export_blocklist}")
-                    print("   [R]esume and append to it")
-                    print("   [C]lear and start fresh")
-                    print("   [A]bort")
-                    choice = input("Choice (R/C/A): ").strip().upper()
-                    if choice == 'A':
-                        print("Aborted.")
-                        sys.exit(0)
-                    elif choice == 'C':
-                        os.remove(args.export_blocklist)
-                        print("Blocklist cleared.")
-                    elif choice == 'R':
-                        # Load existing IPs into detector's tracking set
+                    if args.non_interactive:
+                        # In non-interactive mode (e.g., systemd service), resume by default
                         detector.written_ips = existing_ips
-                        print(f"Resuming with {len(existing_ips)} existing IPs.")
+                        print(f"[OK] Resuming with {len(existing_ips)} existing IPs.")
                     else:
-                        print("Invalid choice. Aborting.")
-                        sys.exit(1)
+                        print("   [R]esume and append to it")
+                        print("   [C]lear and start fresh")
+                        print("   [A]bort")
+                        choice = input("Choice (R/C/A): ").strip().upper()
+                        if choice == 'A':
+                            print("Aborted.")
+                            sys.exit(0)
+                        elif choice == 'C':
+                            os.remove(args.export_blocklist)
+                            print("Blocklist cleared.")
+                        elif choice == 'R':
+                            # Load existing IPs into detector's tracking set
+                            detector.written_ips = existing_ips
+                            print(f"Resuming with {len(existing_ips)} existing IPs.")
+                        else:
+                            print("Invalid choice. Aborting.")
+                            sys.exit(1)
             
             # Create PID lock
             create_pid_lock(pid_file)
