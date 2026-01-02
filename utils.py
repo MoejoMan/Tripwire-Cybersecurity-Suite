@@ -8,7 +8,7 @@ color helpers, CSV export), keeping this module lightweight.
 import os
 import time
 import ipaddress
-from typing import Iterator
+from typing import Iterator, Optional
 
 
 def is_valid_ip(ip_str: str) -> bool:
@@ -28,11 +28,12 @@ def is_valid_ip(ip_str: str) -> bool:
         return False
 
 
-def follow_file(path: str, start_from_end: bool = True, poll_seconds: float = 0.5) -> Iterator[str]:
+def follow_file(path: str, start_from_end: bool = True, poll_seconds: float = 0.5) -> Iterator[Optional[str]]:
     """
     Yield new lines appended to `path` in a loop, similar to `tail -f`.
     Handles simple truncation/rotation by reopening when file size shrinks
-    or the path temporarily disappears.
+    or the path temporarily disappears. Emits `None` during idle periods so
+    callers can still run periodic tasks (heartbeats/refreshes).
     """
     while True:
         try:
@@ -48,6 +49,7 @@ def follow_file(path: str, start_from_end: bool = True, poll_seconds: float = 0.
                         yield line
                     else:
                         time.sleep(poll_seconds)
+                        yield None
                         try:
                             current_size = os.path.getsize(path)
                             if current_size < last_size:

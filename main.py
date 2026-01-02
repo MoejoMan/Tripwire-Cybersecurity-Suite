@@ -769,6 +769,14 @@ def main():
         last_refresh = datetime.now()
         try:
             for line in follow_file(log_path, start_from_end=not start_from_beginning, poll_seconds=0.5):
+                now = datetime.now()
+                if (now - last_refresh).total_seconds() >= refresh_interval:
+                    detector.analyze(verbose=False, export_csv=args.export_csv, filter_severity=filter_sev, compact=compact_mode, live_mode=True, export_blocklist=args.export_blocklist, blocklist_threshold=args.blocklist_threshold, whitelist=whitelist)
+                    print("\n" * 5 + "=" * 100 + "\n" * 5)
+                    last_refresh = now
+
+                if not line:
+                    continue
                 line_attempts = parser.parse_line(line, auto_detect=True)
                 for item in line_attempts:
                     if len(item) == 5:
@@ -780,11 +788,6 @@ def main():
                 # Update coverage from parser stats
                 detector.coverage_start = parser.stats.get('first_timestamp')
                 detector.coverage_end = parser.stats.get('last_timestamp')
-                now = datetime.now()
-                if (now - last_refresh).total_seconds() >= refresh_interval:
-                    detector.analyze(verbose=False, export_csv=args.export_csv, filter_severity=filter_sev, compact=compact_mode, live_mode=True, export_blocklist=args.export_blocklist, blocklist_threshold=args.blocklist_threshold, whitelist=whitelist)
-                    print("\n" * 5 + "=" * 100 + "\n" * 5)
-                    last_refresh = now
         except KeyboardInterrupt:
             print("\nStopping live mode. Final summary:")
             detector.analyze(verbose=False, export_csv=args.export_csv, filter_severity=filter_sev, compact=compact_mode, live_mode=True, export_blocklist=args.export_blocklist, blocklist_threshold=args.blocklist_threshold, whitelist=whitelist)

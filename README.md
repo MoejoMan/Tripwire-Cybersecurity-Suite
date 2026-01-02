@@ -279,6 +279,34 @@ sudo systemctl restart fail2ban
 sudo fail2ban-client status ssh-analyzer
 ```
 
+### Fail2ban + systemd quick setup (production)
+
+1) Install jail + blocklist + filter
+```bash
+sudo cp examples/fail2ban-sshvigil.conf /etc/fail2ban/jail.d/
+sudo mkdir -p /var/lib/sshvigil && sudo touch /var/lib/sshvigil/blocklist.txt
+sudo bash -c 'cat > /etc/fail2ban/filter.d/sshvigil-blocklist.conf << EOF
+[Definition]
+failregex = ^<HOST>$
+ignoreregex =
+EOF'
+sudo fail2ban-client reload
+```
+
+2) Install systemd service
+```bash
+sudo cp examples/sshvigil.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sshvigil
+```
+
+3) Verify
+```bash
+sudo fail2ban-client status sshvigil-blocklist
+sudo tail -f /var/lib/sshvigil/blocklist.txt
+sudo journalctl -u sshvigil -f
+```
+
 See `examples/` folder for complete config files.
 
 ## Notes
