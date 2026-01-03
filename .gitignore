@@ -22,6 +22,14 @@ env/
 *.log
 *.pid
 
+# Local testing & documentation (don't ship)
+MANUAL_TESTING_*.md
+*_WHITELIST_FIX.md
+QUICK_START_DEPLOYMENT.md
+TESTING_GUIDE.md
+vps_test.sh
+test_verify.csv
+
 # Distribution / packaging
 *.egg-info/
 dist/

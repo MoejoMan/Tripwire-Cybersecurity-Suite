@@ -29,8 +29,11 @@ Lightweight security threat detection and defense. Parses system authentication 
 - **CSV export**: Export complete analysis results with timestamps and durations (batch and live mode)
 - **IP validation**: All extracted IPs are validated before processing
 - **IP whitelist**: Prevent self-bans and exclude trusted infrastructure from blocklists
+- **Automatic localhost safety**: Automatically excludes localhost and private IPs to prevent self-lockouts
 - **Non-interactive mode**: Run without prompts for automation (cron, systemd timers)
 - **Live monitoring**: Real-time log tailing with continuous CSV and blocklist updates
+- **fail2ban integration**: One-command setup and auto-generated scripts for fail2ban integration
+- **systemd service**: One-command production deployment with auto-restart and auto-start on boot
 - **Cross-platform**: Works on Windows, Linux, and macOS
 
 ## Requirements
@@ -250,6 +253,83 @@ sudo iptables -F INPUT
 
 ### Automated fail2ban setup
 
+One-command fail2ban integration with automatic jail and filter config creation:
+
+```bash
+# Setup fail2ban jail and filter (creates configs, restarts fail2ban)
+sudo python3 main.py --setup-fail2ban
+
+# Then run in live mode to generate and update blocklist
+python3 main.py --log-file "/var/log/auth.log" --live --export-blocklist /var/lib/sshvigil/blocklist.txt --strict
+```
+
+The `--setup-fail2ban` flag automatically:
+- Creates `/etc/fail2ban/jail.d/sshvigil.conf` (jail configuration)
+- Creates `/etc/fail2ban/filter.d/sshvigil.conf` (filter configuration)
+- Restarts fail2ban to load the new configs
+- Sets up blocklist directory at `/var/lib/sshvigil/`
+
+### Systemd service installation (production)
+
+One-command production deployment with auto-start and auto-restart:
+
+```bash
+# Install and start systemd service (auto-restarts on crash, runs on boot)
+sudo python3 main.py --install-service
+```
+
+The `--install-service` flag automatically:
+- Creates systemd unit at `/etc/systemd/system/sshvigil.service`
+- Enables auto-start on system boot
+- Starts the service immediately
+- Configures auto-restart on failure
+- Uses `--non-interactive` mode to prevent prompts during background operation
+
+After installation, manage the service with standard systemd commands:
+
+```bash
+# Check status
+sudo systemctl status sshvigil
+
+# View live logs
+sudo journalctl -u sshvigil -f
+
+# Restart service
+sudo systemctl restart sshvigil
+
+# Stop service
+sudo systemctl stop sshvigil
+```
+
+### Complete production setup (one-shot)
+
+For a complete production deployment on a fresh system:
+
+```bash
+# 1. Setup fail2ban integration
+sudo python3 main.py --setup-fail2ban
+
+# 2. Install and start systemd service
+sudo python3 main.py --install-service
+
+# 3. Verify fail2ban jail is active
+sudo fail2ban-client status sshvigil
+
+# 4. Monitor logs in real-time
+sudo journalctl -u sshvigil -f
+```
+
+The service will now:
+- Start automatically on system boot
+- Monitor SSH logs in real-time
+- Continuously update `/var/lib/sshvigil/blocklist.txt`
+- fail2ban will automatically ban IPs from the blocklist
+- Auto-restart if the process crashes
+
+### Manual setup (for reference)
+
+If you prefer manual configuration or need advanced customization:
+
 1. Copy filter config:
 ```bash
 sudo cp examples/fail2ban-ssh-analyzer.conf /etc/fail2ban/filter.d/
@@ -278,36 +358,6 @@ python3 main.py --log-file "/var/log/auth.log" --live --export-blocklist /var/lo
 sudo systemctl restart fail2ban
 sudo fail2ban-client status ssh-analyzer
 ```
-
-### Fail2ban + systemd quick setup (production)
-
-1) Install jail + blocklist + filter
-```bash
-sudo cp examples/fail2ban-sshvigil.conf /etc/fail2ban/jail.d/
-sudo mkdir -p /var/lib/sshvigil && sudo touch /var/lib/sshvigil/blocklist.txt
-sudo bash -c 'cat > /etc/fail2ban/filter.d/sshvigil-blocklist.conf << EOF
-[Definition]
-failregex = ^<HOST>$
-ignoreregex =
-EOF'
-sudo fail2ban-client reload
-```
-
-2) Install systemd service
-```bash
-sudo cp examples/sshvigil.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now sshvigil
-```
-
-3) Verify
-```bash
-sudo fail2ban-client status sshvigil-blocklist
-sudo tail -f /var/lib/sshvigil/blocklist.txt
-sudo journalctl -u sshvigil -f
-```
-
-See `examples/` folder for complete config files.
 
 ## Notes
 
